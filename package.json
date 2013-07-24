@@ -1,0 +1,9 @@
+{
+  "name": "img2ascii",
+  "description": "convert an image to an ascii file",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "express": "3.3.4"
+  }
+}

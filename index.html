@@ -1,0 +1,257 @@
+<!doctype html>
+
+<html>
+    <style type="text/css">
+        body {
+	        font-family: sans-serif;
+	        margin: 0px;
+        }
+
+        canvas {
+            border: 1px solid red;
+        }
+
+        #control {
+	        background-color: #444;
+	        color: #eee;
+
+	        position: fixed;
+
+	        height: 22px;
+	        width: 100%;
+	        top: 0px;
+	        padding: 4px;
+        }
+
+        #output {
+	        position: fixed;
+	        left: 0px;
+	        top: 30px;
+	        bottom: 0px;
+	        width: 100%;
+	        overflow: auto;
+	        font-size: 0px;
+        }
+
+	    #output-image.fit {
+		    max-width: 100%;
+		    max-height: 100%;
+	    }
+
+        #output-image.fill {
+	        min-width: 100%;
+	        min-height: 100%;
+        }
+    </style>
+    <script type="text/javascript">
+        function insertionIndexLeft(arr, val) {
+            var low = 0;
+            var high = arr.length;
+
+            while (low != high) {
+                var mid = (high + low) >> 1;
+                if (val > arr[mid]) {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            }
+
+            return low;
+        }
+
+        function closest(arr, val) {
+            if (arr.length === 0) {
+                throw "no entries";
+            }
+
+            if (arr.length === 1) {
+                return 0;
+            }
+
+            var idx = insertionIndexLeft(arr, val);
+
+            if (idx === 0) {
+                return 0;
+            } else if (idx === arr.length) {
+                return arr.length - 1;
+            }
+
+            var lower = arr[idx - 1];
+            var higher = arr[idx];
+            if (val - lower < higher - val) {
+                return idx - 1;
+            } else {
+                return idx;
+            }
+        }
+
+        function generateImageMapper() {
+            var fontSize = 10;
+
+            var scratchCanvas = document.createElement("canvas");
+            var ctx = scratchCanvas.getContext("2d");
+
+            ctx.font = fontSize + "px monospace";
+            var advance = ctx.measureText(".").width;
+
+            scratchCanvas.height = fontSize;
+            scratchCanvas.width = advance;
+            ctx.font = fontSize + "px monospace";
+
+            var pixelsPerChar = advance * fontSize;
+
+            var chars = [];
+
+            for (var i = 32; i < 127; ++i) {
+                if (i === 45 || i === 95) {
+                    continue;
+                }
+                chars.push(String.fromCharCode(i));
+            }
+
+            var brightness = [];
+            var brightest = 0;
+            for (var i = 0; i < chars.length; ++i) {
+                var char = chars[i];
+                ctx.clearRect(0, 0, advance, fontSize);
+                ctx.fillText(char, 0, fontSize - 1);
+                var pixelBytes = ctx.getImageData(0, 0, advance, fontSize).data;
+                var alphaSum = 0;
+                for (var idx = 3; idx < pixelBytes.length; idx += 4) {
+                    alphaSum += pixelBytes[idx];
+                }
+                var thisBrightness = alphaSum / pixelsPerChar
+                if (thisBrightness > brightest) {
+                    brightest = thisBrightness;
+                }
+                brightness.push(thisBrightness);
+            }
+
+            var pairs = chars.map(function(char, i) {
+                return [char, brightness[i]];
+            });
+            pairs.sort(function(a, b) { return a[1] - b[1] });
+
+            pairs.forEach(function(p, i) {
+                chars[i] = p[0];
+                brightness[i] = p[1];
+            });
+
+            function averageColor(pixelBytes, byteWidth, x, y, width, height, numPixels) {
+                var red = 0;
+                var green = 0;
+                var blue = 0;
+
+                var rowStart = y * byteWidth + x * 4;
+                var idx = rowStart
+                for (var r = 0; r < height; ++r) {
+                    for (var c = 0; c < width; ++c) {
+                        red += pixelBytes[idx];
+                        green += pixelBytes[idx + 1];
+                        blue += pixelBytes[idx + 2];
+                        idx += 4;
+                    }
+                    rowStart = rowStart + byteWidth;
+                    idx = rowStart;
+                }
+
+                return [red / numPixels, green / numPixels, blue / numPixels];
+            }
+
+            return function(imageData, ctx) {
+                var pixelBytes = imageData.data;
+                var byteWidth = imageData.width * 4;
+
+                ctx.font = fontSize + "px monospace";
+                ctx.fillStyle = "#0f0";
+                for (var y = 0; y < imageData.height / fontSize; ++y) {
+                    for (var x = 0; x < imageData.width / advance; ++x) {
+                        var color = averageColor(pixelBytes, byteWidth, x * advance, y * fontSize, advance, fontSize, pixelsPerChar);
+
+                        var thisBrightness = (color[0] + color[1] + color[2]) / 3;
+                        var charIdx = closest(brightness, thisBrightness / 255 * brightest);
+                        ctx.fillText(chars[charIdx], x * advance, (y + 1) * fontSize);
+                    }
+                }
+            }
+        }
+
+        var byid = function(id) { return document.getElementById(id) };
+
+        var hiddenCanvas = document.createElement("canvas");
+        var hiddenImage = document.createElement("img");
+        var hiddenContext = hiddenCanvas.getContext("2d");
+        var fr = new FileReader();
+
+
+        document.addEventListener("DOMContentLoaded", function() {
+	        var outputImage = byid("output-image");
+
+	        byid("fit").addEventListener("click", function() {
+		        outputImage.classList.remove("fill");
+		        outputImage.classList.add("fit");
+	        });
+
+	        byid("full").addEventListener("click", function() {
+		        outputImage.classList.remove("fit");
+		        outputImage.classList.remove("fill");
+	        });
+
+	        byid("fill").addEventListener("click", function() {
+		        outputImage.classList.remove("fit");
+		        outputImage.classList.add("fill");
+	        });
+
+	        var imageMapper = generateImageMapper();
+
+            fr.addEventListener("load", function(e) {
+                var resultingString = fr.result;
+                hiddenImage.src = resultingString;
+            });
+
+            hiddenImage.addEventListener("load", function(e) {
+                var width = hiddenImage.width;
+                var height = hiddenImage.height;
+
+                hiddenCanvas.width = width;
+                hiddenCanvas.height = height;
+                hiddenContext.drawImage(hiddenImage, 0, 0);
+                var imageData = hiddenContext.getImageData(0, 0, width, height);
+
+                hiddenContext.fillStyle = "black";
+                hiddenContext.fillRect(0, 0, width, height);
+
+                imageMapper(imageData, hiddenContext);
+
+                outputImage.src = hiddenCanvas.toDataURL();
+            });
+
+	        window.addEventListener("dragover", function(e) {
+                e.dataTransfer.dropEffect = "copy";
+                e.preventDefault();
+            });
+
+	        window.addEventListener("drop", function(e) {
+                if (e.dataTransfer.items.length > 0) {
+                    var item = e.dataTransfer.items[0];
+                    var file = item.getAsFile();
+                    if (fr.readyState !== FileReader.LOADING) {
+                        fr.readAsDataURL(file);
+                    }
+                }
+                e.preventDefault();
+            });
+        });
+    </script>
+
+    <body>
+        <div id="output"><img id="output-image" class="fit" /></div>
+        <div id="control">
+	        Drop your image anywhere!
+	        <button id="fit">Fit</button>
+	        <button id="full">100%</button>
+	        <button id="fill">Fill</button>
+        </div>
+    </body>
+</html>
